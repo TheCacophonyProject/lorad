@@ -90,6 +90,10 @@ dbus-send --system --type=method_call --print-reply        --dest=org.cacophony.
 dbus-send --system --type=method_call --print-reply        --dest=org.cacophony.Lora /org/cacophony/Lora        org.cacophony.Lora.GetResponse int16:1
 *(where int16:1 is the sequence ID returned by any reliable message DBus request in above list)*
 
+**Check LORA status:**
+
+dbus-send --system --type=method_call --print-reply        --dest=org.cacophony.Lora /org/cacophony/Lora        org.cacophony.Lora.GetStatus 
+Reponses are defined in ccm.py as STATUS_###
  
  # Testing / demonstrating
  
