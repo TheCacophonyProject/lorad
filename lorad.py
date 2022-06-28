@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/pi/lora/bin/python3 -u
 
 """ An asynchronous socket <-> LoRaWAN interface """
 
@@ -54,6 +54,12 @@
 import sys, signal
 from time import sleep
 import threading
+import datetime
+
+#logging
+import logging
+from ml_tools.logs import init_logging
+init_logging()
 
 #hardware modem
 #from SX127x.LoRa import *
@@ -62,10 +68,9 @@ import threading
 from l4 import l4
 from l3_LoRaWAN import l3
 from l1_LoRa import l1_LoRa
+from SX127x.board_config import BOARD
+import ccm
 
-#logging
-import logging
-from ml_tools.logs import init_logging
 
 #dbus stuff
 import dbus
@@ -74,13 +79,69 @@ import dbus.service
 #config files
 import toml
 
-class DbusHandler(dbus.service.Object):
+
+
+
+
+
+class TrackingReporter:
+    DBUS_NAME = "org.cacophony.thermalrecorder"
+    DBUS_PATH = "/org/cacophony/thermalrecorder"
+
+    def signal_tracking_callback(self, what, confidence, region, tracking):
+      if tracking==0:
+        print(
+            "Received a tracking signal and it says " + what,
+            confidence,
+            "%"
+        )
+    
+        self.connected=True
+        timestamp = datetime.datetime.utcnow().isoformat()+"Z"
+        l4.queue_unreliable_message(self.endpoint, '{"t": ["'+timestamp+'"], "e": "classifier", "d": {"what": "'+what+'", "conf": '+str(confidence)+'}}')
+
+    def __init__(self, endpoint):
+        self.endpoint=endpoint
+        self.loop = GLib.MainLoop()
+        self.t = threading.Thread(
+            target=self.run_server,
+        )
+        self.t.start()
+        self.connected=False
+
+    def quit(self):
+        self.loop.quit()
+
+    def run_server(self):
+        while True:
+          try:
+            bus = dbus.SystemBus()
+            object = bus.get_object(self.DBUS_NAME, self.DBUS_PATH)
+            break
+          except:
+            logging.error("Failed to subscribe to "+self.DBUS_NAME+". Sleeping 60 secs.")
+            sleep(60)
+            continue
+
+        logging.info("Subscribeed to DBUS")
+
+        bus.add_signal_receiver(
+            self.signal_tracking_callback,
+            dbus_interface=self.DBUS_NAME,
+            signal_name="Tracking",
+        )
+        self.loop.run()
+
+
+class LoraService(dbus.service.Object):
     def __init__(self, lora):
+        print("init DBUS")
         self.bus = dbus.SystemBus()
         self.endpoint=lora
         name = dbus.service.BusName('org.cacophony.Lora', bus=self.bus)
         self.connected = False
         super().__init__(name, '/org/cacophony/Lora')
+        self.endpoint.status = ccm.STATUS_RUNNING
 
     @dbus.service.method('org.cacophony.Lora', out_signature='n', in_singature='')
     def Connect(self):
@@ -112,6 +173,10 @@ class DbusHandler(dbus.service.Object):
         l4.queue_disconnect(self.endpoint)
         return 0
 
+    @dbus.service.method('org.cacophony.Lora', out_signature='n', in_singature='')
+    def GetStatus(self):
+        return lora_service.endpoint.status
+
     @dbus.service.method('org.cacophony.Lora', out_signature='ns', in_singature='s')
     def GetResponse(self, seq):
         self.connected=True
@@ -130,24 +195,26 @@ class txLoop(threading.Thread):
       self.counter = counter
       self.event=threading.Event()
       self.endpoint=lora
+      self.registerQueued=False
 
    def run(self):
       logging.info("Start TX loop")
       self.exit_requested=False
       while not self.event.is_set():
-        if server.connected:
+        if lora_service.connected or tracking_service.connected:
           self.check_tx_queue()
         sleep(1)
  
    # main loop - check if we have packets to tx in either unreliable or reliable 
    # message queue, and if so send them
    def check_tx_queue(self):
-      logging.info("Check TX loop")
+      logging.debug("Check TX loop")
       if len(self.endpoint.um_backlog)>0 or self.endpoint.am_tx_seq_count!=self.endpoint.am_last_tx_seq_acked or self.endpoint.join_required==True:
 
         # if we have exceeded our retry limit, assume we are disconnected, reset the
         # state of the endpoint and discard everything in our queue
         if self.endpoint.tx_retries>l3.MAX_RETRIES:
+          self.endpoint.status=ccm.STATUS_RUNNING
           self.endpoint.joined=False
           self.endpoint.reset_endpoint()
 
@@ -159,10 +226,11 @@ class txLoop(threading.Thread):
             self.endpoint.tx_retries+=1
             l3.send_join(self.endpoint)
             l4.queue_connect(self.endpoint)
+            self.registerQueued=True
 
           # Otherwise, check for unreliable messages to send (we
           # prioritise these are they are faster than reliable messaging) 
-          elif len(self.endpoint.um_backlog)>0:
+          elif self.registerQueued==False and len(self.endpoint.um_backlog)>0:
             logging.info("Send next unreliable message")
             l3.send_unreliable_packet(self.endpoint)
  
@@ -171,10 +239,12 @@ class txLoop(threading.Thread):
             self.endpoint.tx_retries+=1
             #send next message for which an ack has not been received
             l3.send_reliable_packet(self.endpoint)
+            self.registerQueued=False
 
 
 if __name__ == "__main__":
 
+        logging.error ("test error")
         import dbus.mainloop.glib 
         from gi.repository import GLib
 
@@ -207,28 +277,31 @@ if __name__ == "__main__":
 
         mainloop = GLib.MainLoop()
  
-        server = DbusHandler(lora)
-
+        lora_service = LoraService(lora)
+        tracking_service = TrackingReporter(lora)
     
         try:
-            init_logging()
             # Start tx handler loop
             thread1 = txLoop(1, "Thread-1", 1, lora)
             thread1.daemon  = True
             thread1.start()
 
             # Start interrupt handlers for socket and modem callbacks
-            logging.debug ("Starting LoRa DBus service")
+            logging.info ("Starting LoRa DBus service")
             mainloop.run()
-
         except SystemExit:
             logging.warning("Graceful Exit")
 
         finally:
+            logging.error("Forced exit")
             logging.info("Terminate transmit handler")
             thread1.event.set()
             logging.warning("Turn off LoRa radio")
-            lora.set_mode(MODE.SLEEP)
+            l1_LoRa.select_sleep_mode(lora)
             logging.info("Closing socket connection")
-            #server.close()
+            #lora_service.close()
+            logging.info("End Tracking service")
+            tracking_service.quit()
+            logging.info("Disable hardware")
             BOARD.teardown()
+            logging.error("Teardown complete - safe to exit")
