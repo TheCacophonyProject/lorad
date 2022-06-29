@@ -190,7 +190,8 @@ class Server(BaseHTTPRequestHandler):
                   tx_packet.rnr=ccm.NOT_RECEIVED
                   tx_packet.rxc=(endpoints[endpoint].their_last_scnt+1)&15
                   tx_packet.txc=endpoints[endpoint].our_seq_cnt
-                  tx_packet.payload.ccm_ua.status = ccm.STATUS_NONE
+                  tx_packet.payload.ccm_ua.status = ccm.STATUS_FAIL
+                  tx_packet.payload.ccm_ua.response = ""
                   tx_packet.payload.ccm_ua.message = ""
                   logging.info("Sending RNR: "+str((endpoints[endpoint].their_last_scnt+1)&15))
                   #And invalidate / ignore this message

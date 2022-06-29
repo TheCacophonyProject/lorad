@@ -64,7 +64,7 @@ class l3():
         packet.rxc=endpoint.rx_seq_count
         #Set RNR flag if we missed a packet from them
         if endpoint.rx_requires_rnr:
-          paxket.rnr=ccm.NOT_RECEIVED
+          packet.rnr=ccm.NOT_RECEIVED
           endpoint.rx_requires_rnr=False
 
         logging.info('Sending: '+str(packet.txc)+", RR: "+str(packet.rxc))
