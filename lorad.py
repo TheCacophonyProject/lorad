@@ -9,7 +9,7 @@
 # Send the result of those commands to the app-server via LoRaWAN
 # Supported commands are:
 # Connect  
-#    Send JOIN to LoRaWAN gateway 
+#    Send JOIN to LoRaWAN gateway to JOIN the LoRaWAN network
 #    Then send REGISTER to app-server to authenticate with Cacophony API. 
 #    Returns seqId
 # UnreliableMessage <string: message> 
@@ -27,13 +27,16 @@
 #    Possible statuses: QUEUED, SENT, ACKED, PARTIAL, SUCCESS, FAILED, 
 #                       NONE (disconnected or connect rejected)
 #    May return a string with further info
-
+# GetStatus - query LoRa connectivity status
+#    Returns an int16 who's values are defined in ccm.py
+#    Possible statuses: NOT_ACTIVE, ACTIVE, JOINED, REGISTERED
 
 
 # Server runs two transmit queues:
 # - unreliable messages
 # - reliable messages
-# Queues are both FIFO and checked in the above order
+# Queues are both FIFO and checked in the above order (except for a JOIN/REGISTER message which have
+# highest priority)
 # Reliable packets (MCLASS=RELIABLE)
 # - Use a 4 bit sequence counter. Last 15 packets are buffered in cicular
 #   buffer and can be retransmitted upon request (RNR)
@@ -83,7 +86,12 @@ import toml
 
 
 
-
+# Connect to the dbus service provided by classifier-pipeline and listen for any
+# classification events.  Only report 'final classifications' made at end of a track 
+# (tracking==0), and not inyterim classifications
+# Generate an event and queue it using unreliable messageing for all classifications
+# Unreliable messaging is used due to faster throughput.  Could be changed to reliable if
+# guatranteed delivery is required 
 class TrackingReporter:
     DBUS_NAME = "org.cacophony.thermalrecorder"
     DBUS_PATH = "/org/cacophony/thermalrecorder"
@@ -102,15 +110,15 @@ class TrackingReporter:
 
     def __init__(self, endpoint):
         self.endpoint=endpoint
-        self.loop = GLib.MainLoop()
         self.t = threading.Thread(
             target=self.run_server,
         )
         self.t.start()
         self.connected=False
+        self.event=False
 
     def quit(self):
-        self.loop.quit()
+         self.event=True
 
     def run_server(self):
         while True:
@@ -123,25 +131,33 @@ class TrackingReporter:
             sleep(60)
             continue
 
-        logging.info("Subscribeed to DBUS")
+        logging.info("Subscribed to classifier-pipeline DBUS")
 
         bus.add_signal_receiver(
             self.signal_tracking_callback,
             dbus_interface=self.DBUS_NAME,
             signal_name="Tracking",
         )
-        self.loop.run()
+        while not self.event:
+             sleep(1)
 
+	
 
+# This is the main lorad dbus service.  Listens on org.cacophony.Lora for instructions
+# and executes them.
 class LoraService(dbus.service.Object):
     def __init__(self, lora):
         print("init DBUS")
         self.bus = dbus.SystemBus()
         self.endpoint=lora
+        self.loop=GLib.MainLoop()
         name = dbus.service.BusName('org.cacophony.Lora', bus=self.bus)
         self.connected = False
         super().__init__(name, '/org/cacophony/Lora')
         self.endpoint.status = ccm.STATUS_RUNNING
+
+    def quit(self):
+        self.loop.quit()
 
     @dbus.service.method('org.cacophony.Lora', out_signature='n', in_singature='')
     def Connect(self):
@@ -199,9 +215,9 @@ class txLoop(threading.Thread):
 
    def run(self):
       logging.info("Start TX loop")
-      self.exit_requested=False
       while not self.event.is_set():
-        if lora_service.connected or tracking_service.connected:
+#        if lora_service.connected or tracking_service.connected:
+        if lora_service.connected:
           self.check_tx_queue()
         sleep(1)
  
@@ -249,10 +265,21 @@ if __name__ == "__main__":
         from gi.repository import GLib
 
         def terminateProcess(signalNumber=None, frame=None):
-            #raise Exception('GracefulExit')
+            logging.error("Forced exit")
+            logging.info("Terminate transmit handler")
+            thread1.event.set()
+            logging.warning("Turn off LoRa radio")
+            l1_LoRa.select_sleep_mode(lora)
+            logging.info("Closing socket connection")
+            lora_service.quit()
+            logging.info("End Tracking service")
+            tracking_service.quit()
+            logging.info("Disable hardware")
+            BOARD.teardown()
+            logging.error("Teardown complete - safe to exit")
+
             sys.exit(0)
 
-        signal.signal(signal.SIGTERM, terminateProcess)
 
         lora = l1_LoRa(l3.receive_packet_callback, verbose=False)
 
@@ -284,7 +311,11 @@ if __name__ == "__main__":
             # Start tx handler loop
             thread1 = txLoop(1, "Thread-1", 1, lora)
             thread1.daemon  = True
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
             thread1.start()
+            signal.signal(signal.SIGTERM, terminateProcess)
+            signal.signal(signal.SIGINT, terminateProcess)
 
             # Start interrupt handlers for socket and modem callbacks
             logging.info ("Starting LoRa DBus service")
@@ -293,15 +324,4 @@ if __name__ == "__main__":
             logging.warning("Graceful Exit")
 
         finally:
-            logging.error("Forced exit")
-            logging.info("Terminate transmit handler")
-            thread1.event.set()
-            logging.warning("Turn off LoRa radio")
-            l1_LoRa.select_sleep_mode(lora)
-            logging.info("Closing socket connection")
-            #lora_service.close()
-            logging.info("End Tracking service")
-            tracking_service.quit()
-            logging.info("Disable hardware")
-            BOARD.teardown()
-            logging.error("Teardown complete - safe to exit")
+            terminateProcess(0)
