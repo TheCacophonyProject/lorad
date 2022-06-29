@@ -216,8 +216,7 @@ class txLoop(threading.Thread):
    def run(self):
       logging.info("Start TX loop")
       while not self.event.is_set():
-#        if lora_service.connected or tracking_service.connected:
-        if lora_service.connected:
+        if lora_service.connected or tracking_service.connected:
           self.check_tx_queue()
         sleep(1)
  
