@@ -33,10 +33,26 @@ Bugfixes have been made to this package to pprovide better handling on corrupted
 
 # Dependencies
 
-TODO
+pip3 install pycrypto
+pip3 install RPi.GPIO
+pip3 install spidev
+pip3 install dbus-python
+pip3 install toml
+pip3 install PyGObject 
 
 
 # Hardware setup
+
+RPI must have SPI1 enabled:
+
+Add the following lines to the /boot/config.txt:
+
+```
+dtparam=spi=on
+dtoverlay=spi1-3cs
+```
+And disable audiobait:
+#dtoverlay=hifiberry-dac
 
 SX1276 or RFM95W modem wired as follows to use SPI1.0 (ALT4 pin mode):
 
@@ -49,7 +65,7 @@ SX1276 or RFM95W modem wired as follows to use SPI1.0 (ALT4 pin mode):
 | NSS       | Blue   | 12      | SPI1_CE0  |
 | Reset     | Pruple | 31      | GPIO6     |
 | Vcc       | Red    | 1       | +5v       |
-| DIO0       | Brown  | 7       | GPIO4     |
+| DIO0      | Brown  | 7       | GPIO4     |
 
 DIO1 through DIO3 are not used
 
