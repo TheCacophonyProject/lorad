@@ -33,13 +33,14 @@ Bugfixes have been made to this package to pprovide better handling on corrupted
 
 # Dependencies
 
+```
 pip3 install pycrypto
 pip3 install RPi.GPIO
 pip3 install spidev
 pip3 install dbus-python
 pip3 install toml
 pip3 install PyGObject 
-
+```
 
 # Hardware setup
 
