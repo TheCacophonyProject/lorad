@@ -53,7 +53,9 @@ dtparam=spi=on
 dtoverlay=spi1-3cs
 ```
 And disable audiobait:
+```
 #dtoverlay=hifiberry-dac
+```
 
 SX1276 or RFM95W modem wired as follows to use SPI1.0 (ALT4 pin mode):
 
