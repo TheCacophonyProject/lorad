@@ -9,6 +9,7 @@ It has been tested using:
  - MikroTik WAP LA9 kit (gateway): https://www.pbtech.co.nz/product/NETMKT1315/MikroTik-RBwAPR-2nD-R11e-LoRa9-wAP-Lora9-Outdoor-L
  - TheThingsNetwork (network server): https://au1.cloud.thethings.network/
  - Cacophony Thermal Camera running buster, classifier-pipeline (currently requires signals branch)
+ - For event upload via lora - requires event reporter lora_events branch
  
 It is designed to be used in conjunction with cacophony-lora-appserver running on an internet-connected server
 
